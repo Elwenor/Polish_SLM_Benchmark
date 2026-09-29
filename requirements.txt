@@ -1,3 +1,5 @@
+# Polish SLM Benchmark — runtime dependencies
+
 lm_eval @ git+https://github.com/speakleash/lm-evaluation-harness.git@21d0ea9cf4fd6153dfff4d84d6ad0aab5488f302
 
 transformers==5.5.0
