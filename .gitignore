@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+benchmark-clean/
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Benchmark outputs
+results/
+results_*/
+openpl_final_run/
+clean_env_smoke/
+smoke_test/
+
+# Generated result files/directories
+**/captured_requests.jsonl
+**/official_lm_eval_results.json
+**/final_results.json
+**/final_results.csv
+**/per_example.jsonl
+**/final_task_result.json
+
+# Local models / checkpoints
+checkpoints/
+runs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Hugging Face / model caches if created locally
+.cache/
+huggingface/
+
+# Local environment/debug dumps
+pip-freeze.txt
+working_environment.txt
+environment-local.txt
+
+# Secrets
+.env
+.env.*
+!.env.example
