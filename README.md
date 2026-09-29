@@ -4,7 +4,105 @@ Minimal runner for evaluating small Polish causal language models on 10 OpenPL t
 
 Current scorer version: **1.0.1**
 
+The benchmark uses a pinned revision of the SpeakLeash fork of
+`lm-evaluation-harness`, which contains the OpenPL task definitions required
+by the scorer.
+
+## Installation
+
+Python **3.12** is recommended.
+
+Clone the repository:
+
+```bash
+git clone https://github.com/Elwenor/Polish_SLM_Benchmark.git
+cd Polish_SLM_Benchmark
+```
+
+Create a clean virtual environment.
+
+### Windows PowerShell
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Linux / macOS
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+The required OpenPL tasks are provided by the SpeakLeash fork of
+`lm-evaluation-harness`, pinned to:
+
+```text
+21d0ea9cf4fd6153dfff4d84d6ad0aab5488f302
+```
+
+No separate clone of `lm-evaluation-harness` is required.
+
+## Verify the environment
+
+Before running an evaluation:
+
+```bash
+python check_environment.py
+```
+
+A compatible installation should end with:
+
+```text
+Environment OK: all 10 required OpenPL tasks found.
+```
+
+The checker verifies:
+
+- `lm_eval`
+- `TaskManager`
+- Hugging Face `HFLM`
+- all 10 required OpenPL tasks
+- installed package versions
+- CUDA availability
+- the pinned `lm-evaluation-harness` revision when available from package metadata
+
+## PyTorch / CUDA
+
+A CUDA-specific PyTorch build is intentionally not pinned in
+`requirements.txt`.
+
+Install a PyTorch build appropriate for your operating system and GPU if the
+automatically installed version is not suitable for your setup.
+
+The benchmark has been validated in the following reference environment:
+
+```text
+Python        3.12.2
+lm_eval       0.4.2
+Transformers  5.5.0
+datasets      3.6.0
+accelerate    1.13.0
+PyTorch       2.9.1+cu130
+CUDA runtime  13.0
+```
+
+See `requirements-tested.txt` for the package versions used in the reference
+environment.
+
+Exact floating-point results may vary slightly across hardware, CUDA and
+PyTorch versions.
+
 ## Usage
+
+Example evaluation of a Hugging Face causal language model:
 
 ```powershell
 python .\Polish_SLM_Benchmark_v1.0.1.py `
@@ -16,7 +114,88 @@ python .\Polish_SLM_Benchmark_v1.0.1.py `
   --out ".\results_gollem_v3"
 ```
 
-A local Transformers model can be used by passing its local directory to `--model`.
+Linux / macOS equivalent:
+
+```bash
+python Polish_SLM_Benchmark_v1.0.1.py \
+  --source hf \
+  --model "SlayerLab/GoLLeM-110M-PL-v3" \
+  --device cuda:0 \
+  --dtype bf16 \
+  --batch-size 8 \
+  --out "./results_gollem_v3"
+```
+
+A local Transformers model can be evaluated by passing its local directory to
+`--model`.
+
+For a quick smoke test, use `--limit`:
+
+```powershell
+python .\Polish_SLM_Benchmark_v1.0.1.py `
+  --source hf `
+  --model "SlayerLab/GoLLeM-110M-PL-v3" `
+  --device cuda:0 `
+  --dtype bf16 `
+  --batch-size 8 `
+  --limit 2 `
+  --out ".\smoke_test"
+```
+
+`--limit` is intended for debugging only. Results obtained with a limit should
+not be reported as full benchmark scores.
+
+## Custom models and checkpoints
+
+Models that are not directly loadable through Hugging Face Transformers can be
+evaluated through an adapter.
+
+Example:
+
+```powershell
+python .\Polish_SLM_Benchmark_v1.0.1.py `
+  --source adapter `
+  --adapter-file ".\my_openpl_adapter.py" `
+  --checkpoint ".\checkpoints\model.pt" `
+  --device cuda:0 `
+  --batch-size 8 `
+  --dtype bf16 `
+  --out ".\results_custom_model"
+```
+
+The adapter must expose:
+
+```python
+build_lm(checkpoint, device, batch_size, dtype, args)
+```
+
+and return an object compatible with the evaluation harness, including at
+least:
+
+```text
+loglikelihood
+tokenizer
+```
+
+This makes the scorer independent of the training framework. The benchmark is
+an **evaluation tool**, not a training framework.
+
+## OpenPL tasks
+
+The benchmark evaluates the following 10 tasks:
+
+```text
+polemo2_in_multiple_choice
+polemo2_out_multiple_choice
+polish_8tags_multiple_choice
+polish_belebele_mc
+polish_cbd_multiple_choice
+polish_dyk_multiple_choice
+polish_klej_ner_multiple_choice
+polish_polqa_reranking_multiple_choice
+polish_ppc_multiple_choice
+polish_psc_multiple_choice
+```
 
 ## Scoring
 
@@ -34,9 +213,81 @@ PPC               domain PMI + accuracy
 PSC               domain PMI + binary F1
 ```
 
-The final score is the unweighted mean of the 10 primary task scores.
+The final benchmark score is the **unweighted mean of the 10 primary task
+scores**.
 
 It is **not** the original OpenPL `AVG acc_norm`.
+
+The scorer also records the original `lm-evaluation-harness` metrics for
+diagnostic purposes.
+
+## Sanity checks
+
+For every task, the scorer reconstructs raw accuracy from the captured
+log-likelihood requests and compares it with the corresponding accuracy
+reported by `lm-evaluation-harness`.
+
+If the reconstructed score differs from the harness result by more than the
+configured tolerance, the task fails the sanity check and its final benchmark
+score is not trusted.
+
+This is intended to catch problems such as:
+
+- incompatible task definitions
+- incorrect label reconstruction
+- unexpected harness behavior
+- scorer/task version mismatches
+
+## Output
+
+Each run creates an output directory containing:
+
+```text
+final_results.json
+final_results.csv
+official_lm_eval_results.json
+captured_requests.jsonl
+
+<task>/
+  final_task_result.json
+  per_example.jsonl
+```
+
+`final_results.json` contains the benchmark summary and per-task scores.
+
+The per-example files are useful for auditing label mappings, likelihoods,
+PMI corrections and unexpected model behavior.
+
+## Reproducibility
+
+The benchmark depends on the OpenPL task definitions present in the pinned
+SpeakLeash `lm-evaluation-harness` revision.
+
+The reference revision is:
+
+```text
+https://github.com/speakleash/lm-evaluation-harness
+commit: 21d0ea9cf4fd6153dfff4d84d6ad0aab5488f302
+```
+
+Using another revision of `lm-evaluation-harness` may change:
+
+- task prompts
+- dataset configuration
+- label mappings
+- request construction
+- metrics
+- final scores
+
+For comparable benchmark results, use the dependencies from this repository
+and verify the environment with:
+
+```bash
+python check_environment.py
+```
+
+GitHub Actions also runs a clean-environment smoke test on every push and pull
+request.
 
 ## v1.0.1
 
@@ -48,15 +299,59 @@ PPC  -> sentence_A + sentence_B
 PSC  -> extract_text + summary_text
 ```
 
-An independent GoLLeM evaluation highlighted discrepancies in these tasks and prompted a re-audit of the scorer.
+An independent GoLLeM evaluation highlighted discrepancies in these tasks and
+prompted a re-audit of the scorer.
 
-Thanks to **Maggio33 / SlayerLab**:
+Thanks to **Maggio33 / SlayerLab** for the independent evaluation:
 
 https://huggingface.co/Maggio33/GoLLeM-110M-PL-v3
 
+## Reporting results
+
+When publishing benchmark results, please report at least:
+
+```text
+model name / checkpoint
+model revision, if applicable
+scorer version
+final composite score
+per-task scores
+number of tasks passing the sanity check
+```
+
+For Hugging Face models, using an immutable model revision or commit hash is
+recommended when exact reproducibility is important.
+
 ## Issues
 
-If you find a problem with label mapping, prompt blanking, PMI baselines, task metrics, or OpenPL reconstruction, please open an issue with the affected task and reproduction details.
+If you find a problem with:
+
+- label mapping
+- prompt blanking
+- PMI baselines
+- task metrics
+- OpenPL reconstruction
+- dependency compatibility
+
+please open an issue with the affected task and enough information to reproduce
+the problem.
+
+Useful reproduction information includes:
+
+```text
+Python version
+PyTorch version
+Transformers version
+lm_eval version
+CUDA version, if applicable
+model / checkpoint
+scorer version
+error message or affected task
+```
+
+Please do not include local filesystem paths, credentials, private model
+locations or other machine-specific information unless it is necessary to
+reproduce the issue.
 
 ## Citation
 
