@@ -1,0 +1,54 @@
+name: Smoke test
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: Python 3.12 / OpenPL environment
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Show Python version
+        run: |
+          python --version
+          python -m pip --version
+
+      - name: Upgrade pip
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install -r requirements.txt
+
+      - name: Check environment and OpenPL tasks
+        run: |
+          python check_environment.py
+
+      - name: Check scorer imports
+        run: |
+          python -c "from lm_eval import evaluator, tasks; from lm_eval.models.huggingface import HFLM; print('lm_eval imports OK')"
+
+      - name: Check benchmark CLI
+        run: |
+          python Polish_SLM_Benchmark_v1.0.1.py --help
