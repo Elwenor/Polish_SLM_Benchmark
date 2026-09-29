@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import sys
-from pathlib import Path
 
 import torch
 import transformers
@@ -40,32 +39,29 @@ def package_version(name: str) -> str:
 
 def get_lm_eval_commit() -> str | None:
     """
-    Read VCS metadata written by pip for a direct Git installation.
+    Read the Git commit recorded by pip for a direct VCS installation.
 
-    Does not print or expose local installation paths.
+    This does not expose local filesystem paths.
     """
     try:
         dist = importlib.metadata.distribution("lm_eval")
     except importlib.metadata.PackageNotFoundError:
         return None
 
+    direct_url = dist.read_text("direct_url.json")
+
+    if not direct_url:
+        return None
+
     try:
-        direct_url = dist.read_text("direct_url.json")
-        if not direct_url:
-            return None
-
         data = json.loads(direct_url)
+    except json.JSONDecodeError:
+        return None
 
-        vcs_info = data.get("vcs_info") or {}
-        commit = vcs_info.get("commit_id")
+    vcs_info = data.get("vcs_info") or {}
+    commit = vcs_info.get("commit_id")
 
-        if commit:
-            return str(commit)
-
-    except (json.JSONDecodeError, OSError, TypeError):
-        pass
-
-    return None
+    return str(commit) if commit else None
 
 
 def fail(message: str) -> None:
@@ -73,8 +69,8 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def main() -> None:
-    print("=== Polish SLM Benchmark environment check ===\n")
+def print_environment() -> None:
+    print("=== Environment ===\n")
 
     print("Python:", sys.version.split()[0])
     print("lm_eval:", package_version("lm_eval"))
@@ -82,9 +78,42 @@ def main() -> None:
     print("transformers:", transformers.__version__)
     print("datasets:", package_version("datasets"))
     print("accelerate:", package_version("accelerate"))
-    print("CUDA available:", torch.cuda.is_available())
+
+    cuda_available = torch.cuda.is_available()
+
+    print("CUDA available:", cuda_available)
     print("CUDA runtime:", torch.version.cuda or "none")
 
+    if cuda_available:
+        print("CUDA devices:", torch.cuda.device_count())
+
+        for index in range(torch.cuda.device_count()):
+            try:
+                print(
+                    f"GPU {index}:",
+                    torch.cuda.get_device_name(index),
+                )
+            except Exception:
+                print(f"GPU {index}: unknown")
+    else:
+        print()
+        print(
+            "NOTE: CUDA is not available in this Python environment."
+        )
+        print(
+            "GPU evaluation with --device cuda:* will not work here."
+        )
+        print(
+            "This may happen even if NVIDIA drivers or the CUDA Toolkit "
+            "are installed system-wide."
+        )
+        print(
+            "Install a CUDA-enabled PyTorch build in this environment "
+            "or use --device cpu."
+        )
+
+
+def check_harness() -> None:
     print("\n=== lm-evaluation-harness ===")
 
     commit = get_lm_eval_commit()
@@ -95,7 +124,7 @@ def main() -> None:
         if commit != EXPECTED_HARNESS_COMMIT:
             print(
                 "WARNING: installed lm-evaluation-harness commit differs "
-                "from the reference commit."
+                "from the validated reference commit."
             )
             print("Expected:", EXPECTED_HARNESS_COMMIT)
     else:
@@ -104,6 +133,8 @@ def main() -> None:
             "(task compatibility will still be checked)"
         )
 
+
+def check_api() -> None:
     print("\n=== API ===")
 
     if not hasattr(tasks, "TaskManager"):
@@ -115,10 +146,14 @@ def main() -> None:
     print("[OK] TaskManager")
 
     if HFLM is None:
-        fail("lm_eval.models.huggingface.HFLM is unavailable.")
+        fail(
+            "lm_eval.models.huggingface.HFLM is unavailable."
+        )
 
     print("[OK] HFLM")
 
+
+def check_openpl_tasks() -> None:
     print("\n=== OpenPL tasks ===")
 
     try:
@@ -140,10 +175,11 @@ def main() -> None:
             missing.append(task_name)
 
     if missing:
+        found = len(EXPECTED_TASKS) - len(missing)
+
         print()
         print(
-            f"Found {len(EXPECTED_TASKS) - len(missing)}"
-            f"/{len(EXPECTED_TASKS)} required OpenPL tasks."
+            f"Found {found}/{len(EXPECTED_TASKS)} required OpenPL tasks."
         )
 
         fail(
@@ -162,6 +198,29 @@ def main() -> None:
         f"Environment OK: all {len(EXPECTED_TASKS)} "
         "required OpenPL tasks found."
     )
+
+
+def main() -> None:
+    print(
+        "=== Polish SLM Benchmark environment check ==="
+    )
+
+    print_environment()
+    check_harness()
+    check_api()
+    check_openpl_tasks()
+
+    if torch.cuda.is_available():
+        print()
+        print("GPU status: ready for CUDA evaluation.")
+    else:
+        print()
+        print(
+            "GPU status: not available in this Python environment."
+        )
+        print(
+            "CPU evaluation is still possible with --device cpu."
+        )
 
 
 if __name__ == "__main__":
