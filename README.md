@@ -28,7 +28,6 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
-pip install -r requirements.txt
 ```
 
 ### Linux / macOS
@@ -38,11 +37,96 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 
 python -m pip install --upgrade pip
+```
+
+## PyTorch and accelerator support
+
+Install PyTorch for your hardware **before** installing the remaining benchmark dependencies.
+
+The correct PyTorch build depends on your platform and accelerator:
+
+- **NVIDIA GPU**: install a CUDA-enabled PyTorch build
+- **AMD GPU on supported Linux systems**: install a ROCm-enabled PyTorch build
+- **CPU-only**: install the standard CPU build
+- **macOS / Apple Silicon**: PyTorch may use the MPS backend where supported
+
+Use the official PyTorch installation instructions for the appropriate command:
+
+https://pytorch.org/get-started/locally/
+
+### NVIDIA / CUDA
+
+After installing PyTorch, verify that the current Python environment can see your NVIDIA GPU:
+
+```bash
+python -c "import torch; print('torch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA runtime:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+```
+
+For GPU evaluation with:
+
+```text
+--device cuda:0
+```
+
+you should see:
+
+```text
+CUDA available: True
+```
+
+A result such as:
+
+```text
+torch: 2.x.x+cpu
+CUDA available: False
+CUDA runtime: None
+```
+
+means that the current Python environment contains a CPU-only PyTorch build,
+even if NVIDIA drivers or the CUDA Toolkit are installed system-wide.
+
+Installing CUDA on the operating system is not enough by itself. The Python
+environment running the benchmark must also contain a CUDA-enabled PyTorch build.
+
+### AMD / ROCm
+
+On supported Linux systems, AMD GPUs can be used through a ROCm-enabled PyTorch build.
+
+Verify the installation with:
+
+```bash
+python -c "import torch; print('torch:', torch.__version__); print('HIP:', torch.version.hip); print('GPU available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+```
+
+PyTorch uses the `torch.cuda` API for both CUDA and ROCm devices, so AMD GPUs running through ROCm are typically still addressed as:
+
+```text
+--device cuda:0
+```
+
+This naming is inherited from PyTorch and does not mean that an AMD GPU is using NVIDIA CUDA.
+
+ROCm support depends on the operating system, GPU generation, driver stack and PyTorch build. Check the current PyTorch/ROCm documentation for supported configurations.
+
+### CPU
+
+CPU execution is supported with:
+
+```text
+--device cpu
+```
+
+but full benchmark runs will be substantially slower.
+
+## Install benchmark dependencies
+
+After installing a suitable PyTorch build:
+
+```bash
 pip install -r requirements.txt
 ```
 
-The required OpenPL tasks are provided by the SpeakLeash fork of
-`lm-evaluation-harness`, pinned to:
+The required OpenPL tasks are provided by the SpeakLeash fork of `lm-evaluation-harness`, pinned to:
 
 ```text
 21d0ea9cf4fd6153dfff4d84d6ad0aab5488f302
@@ -71,16 +155,12 @@ The checker verifies:
 - Hugging Face `HFLM`
 - all 10 required OpenPL tasks
 - installed package versions
-- CUDA availability
+- accelerator availability reported by PyTorch
 - the pinned `lm-evaluation-harness` revision when available from package metadata
 
-## PyTorch / CUDA
+The checker does **not** require a GPU. CPU-only environments are valid, but GPU-specific runs will only work if the corresponding PyTorch backend is available in the current Python environment.
 
-A CUDA-specific PyTorch build is intentionally not pinned in
-`requirements.txt`.
-
-Install a PyTorch build appropriate for your operating system and GPU if the
-automatically installed version is not suitable for your setup.
+## Reference environment
 
 The benchmark has been validated in the following reference environment:
 
@@ -94,13 +174,18 @@ PyTorch       2.9.1+cu130
 CUDA runtime  13.0
 ```
 
-See `requirements-tested.txt` for the package versions used in the reference
-environment.
+This is a reference configuration, not a mandatory hardware requirement.
 
-Exact floating-point results may vary slightly across hardware, CUDA and
-PyTorch versions.
+See `requirements-tested.txt` for the package versions used in the reference environment.
+
+Exact floating-point results may vary slightly across hardware, accelerator backends, drivers, PyTorch versions and numerical precision settings.
 
 ## Usage
+
+The examples below use `cuda:0`.
+
+- For CPU evaluation, use `--device cpu`.
+- On ROCm-enabled AMD systems, PyTorch typically also exposes the GPU through the `cuda:*` device namespace.
 
 Example evaluation of a Hugging Face causal language model:
 
@@ -126,8 +211,7 @@ python Polish_SLM_Benchmark_v1.0.1.py \
   --out "./results_gollem_v3"
 ```
 
-A local Transformers model can be evaluated by passing its local directory to
-`--model`.
+A local Transformers model can be evaluated by passing its local directory to `--model`.
 
 For a quick smoke test, use `--limit`:
 
@@ -142,13 +226,11 @@ python .\Polish_SLM_Benchmark_v1.0.1.py `
   --out ".\smoke_test"
 ```
 
-`--limit` is intended for debugging only. Results obtained with a limit should
-not be reported as full benchmark scores.
+`--limit` is intended for debugging only. Results obtained with a limit should not be reported as full benchmark scores.
 
 ## Custom models and checkpoints
 
-Models that are not directly loadable through Hugging Face Transformers can be
-evaluated through an adapter.
+Models that are not directly loadable through Hugging Face Transformers can be evaluated through an adapter.
 
 Example:
 
@@ -169,16 +251,14 @@ The adapter must expose:
 build_lm(checkpoint, device, batch_size, dtype, args)
 ```
 
-and return an object compatible with the evaluation harness, including at
-least:
+and return an object compatible with the evaluation harness, including at least:
 
 ```text
 loglikelihood
 tokenizer
 ```
 
-This makes the scorer independent of the training framework. The benchmark is
-an **evaluation tool**, not a training framework.
+This makes the scorer independent of the training framework. The benchmark is an **evaluation tool**, not a training framework.
 
 ## OpenPL tasks
 
@@ -213,23 +293,17 @@ PPC               domain PMI + accuracy
 PSC               domain PMI + binary F1
 ```
 
-The final benchmark score is the **unweighted mean of the 10 primary task
-scores**.
+The final benchmark score is the **unweighted mean of the 10 primary task scores**.
 
 It is **not** the original OpenPL `AVG acc_norm`.
 
-The scorer also records the original `lm-evaluation-harness` metrics for
-diagnostic purposes.
+The scorer also records the original `lm-evaluation-harness` metrics for diagnostic purposes.
 
 ## Sanity checks
 
-For every task, the scorer reconstructs raw accuracy from the captured
-log-likelihood requests and compares it with the corresponding accuracy
-reported by `lm-evaluation-harness`.
+For every task, the scorer reconstructs raw accuracy from the captured log-likelihood requests and compares it with the corresponding accuracy reported by `lm-evaluation-harness`.
 
-If the reconstructed score differs from the harness result by more than the
-configured tolerance, the task fails the sanity check and its final benchmark
-score is not trusted.
+If the reconstructed score differs from the harness result by more than the configured tolerance, the task fails the sanity check and its final benchmark score is not trusted.
 
 This is intended to catch problems such as:
 
@@ -255,13 +329,11 @@ captured_requests.jsonl
 
 `final_results.json` contains the benchmark summary and per-task scores.
 
-The per-example files are useful for auditing label mappings, likelihoods,
-PMI corrections and unexpected model behavior.
+The per-example files are useful for auditing label mappings, likelihoods, PMI corrections and unexpected model behavior.
 
 ## Reproducibility
 
-The benchmark depends on the OpenPL task definitions present in the pinned
-SpeakLeash `lm-evaluation-harness` revision.
+The benchmark depends on the OpenPL task definitions present in the pinned SpeakLeash `lm-evaluation-harness` revision.
 
 The reference revision is:
 
@@ -279,15 +351,13 @@ Using another revision of `lm-evaluation-harness` may change:
 - metrics
 - final scores
 
-For comparable benchmark results, use the dependencies from this repository
-and verify the environment with:
+For comparable benchmark results, use the dependencies from this repository and verify the environment with:
 
 ```bash
 python check_environment.py
 ```
 
-GitHub Actions also runs a clean-environment smoke test on every push and pull
-request.
+GitHub Actions also runs a clean-environment smoke test on every push and pull request.
 
 ## v1.0.1
 
@@ -299,8 +369,7 @@ PPC  -> sentence_A + sentence_B
 PSC  -> extract_text + summary_text
 ```
 
-An independent GoLLeM evaluation highlighted discrepancies in these tasks and
-prompted a re-audit of the scorer.
+An independent GoLLeM evaluation highlighted discrepancies in these tasks and prompted a re-audit of the scorer.
 
 Thanks to **Maggio33 / SlayerLab** for the independent evaluation:
 
@@ -319,8 +388,7 @@ per-task scores
 number of tasks passing the sanity check
 ```
 
-For Hugging Face models, using an immutable model revision or commit hash is
-recommended when exact reproducibility is important.
+For Hugging Face models, using an immutable model revision or commit hash is recommended when exact reproducibility is important.
 
 ## Issues
 
@@ -333,8 +401,7 @@ If you find a problem with:
 - OpenPL reconstruction
 - dependency compatibility
 
-please open an issue with the affected task and enough information to reproduce
-the problem.
+please open an issue with the affected task and enough information to reproduce the problem.
 
 Useful reproduction information includes:
 
@@ -343,15 +410,14 @@ Python version
 PyTorch version
 Transformers version
 lm_eval version
-CUDA version, if applicable
+CUDA / ROCm version, if applicable
+GPU model, if applicable
 model / checkpoint
 scorer version
 error message or affected task
 ```
 
-Please do not include local filesystem paths, credentials, private model
-locations or other machine-specific information unless it is necessary to
-reproduce the issue.
+Please do not include local filesystem paths, credentials, private model locations or other machine-specific information unless it is necessary to reproduce the issue.
 
 ## Citation
 
